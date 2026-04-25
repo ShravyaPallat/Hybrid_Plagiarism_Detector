@@ -4,42 +4,40 @@ Implementation of the system described in the paper:
 **"Hybrid Multimodal Plagiarism Detection System Integrating Lexical–Semantic Analysis with OCR-Based Image Processing"**
 
 ---
+## Features
+- **TF-IDF Similarity** for direct text matching
+- **Sentence-BERT Similarity** for semantic/paraphrased content detection
+- **OCR Support** for image files using Tesseract
+- **PDF Text Extraction**
+- **Hybrid Weighted Scoring**
+- **Interactive Streamlit UI**
+- **Downloadable Reports**
 
+## Technologies Used
+- Python
+- Streamlit
+- Sentence-Transformers
+- PyMuPDF
+- Pytesseract
+- Pillow
+
+## Supported Input Formats
+- `.txt`
+- `.pdf`
+- `.png`
+- `.jpg`
+- `.jpeg`
+
+## Project Structure
+
+```text
+Hybrid-Plagiarism-Detector/
+│── app.py
+│── plagiarism_detector.py
+│── requirements.txt
+│── README.md
 ## Architecture
 
-```
-Input (text / image / PDF)
-        │
-        ▼
-┌─────────────────┐
-│  InputHandler   │  Detects file type
-└────────┬────────┘
-         │ image?
-         ▼
-┌─────────────────┐
-│   OCRModule     │  Tesseract → plain text
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  Preprocessor   │  lowercase, stop-words, tokenise
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    ▼         ▼
-┌────────┐ ┌──────────────┐
-│TF-IDF  │ │ Sentence-BERT│
-│Engine  │ │ Engine       │
-└───┬────┘ └──────┬───────┘
-    │              │
-    └──────┬───────┘
-           ▼
-┌──────────────────────┐
-│ SimilarityAggregator │  40% TF-IDF + 60% SBERT
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│  ReportGenerator     │
-└──────────────────────┘
 ```
 
 ---
@@ -60,25 +58,6 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Command-line
-
-```bash
-# Text files
-python plagiarism_detector.py submission.txt reference.txt
-
-# Image / scanned document
-python plagiarism_detector.py scan.png reference.txt
-
-# PDF
-python plagiarism_detector.py submission.pdf reference.pdf
-
-# Raw strings
-python plagiarism_detector.py "Students often copy text." "Text is frequently copied."
-
-# Custom weights
-python plagiarism_detector.py sub.txt ref.txt --lexical-weight 0.3 --semantic-weight 0.7
-```
-
 ### Streamlit UI
 
 ```bash
@@ -87,21 +66,6 @@ streamlit run app.py
 
 Then open http://localhost:8501 in your browser.
 
-### Python API
-
-```python
-from plagiarism_detector import PlagiarismDetector
-
-detector = PlagiarismDetector(lexical_weight=0.4, semantic_weight=0.6)
-
-result = detector.detect("submission.txt", "reference.txt")
-
-print(result["tfidf_score"])   # e.g. 0.72
-print(result["sbert_score"])   # e.g. 0.84
-print(result["hybrid_score"])  # e.g. 0.79
-print(result["verdict"])       # e.g. "HIGH — likely plagiarism"
-print(result["common_phrases"])
-```
 
 ---
 
