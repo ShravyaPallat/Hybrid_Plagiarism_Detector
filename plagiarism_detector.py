@@ -15,7 +15,14 @@ from pathlib import Path
 try:
     from PIL import Image
     import pytesseract
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    import shutil, os
+    _tess=(
+        shutil.which("tesseract")
+        or "/usr/bin/tesseract"
+        or  r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    )
+    if _tess:
+        pytesseract.pytesseract.tesseract_cmd=_tess
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
