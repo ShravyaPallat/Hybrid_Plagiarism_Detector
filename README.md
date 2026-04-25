@@ -12,6 +12,7 @@ Implementation of the system described in the paper:
 - **Hybrid Weighted Scoring**
 - **Interactive Streamlit UI**
 - **Downloadable Reports**
+- **Live Demo: https://hybridplagiarismdetector.streamlit.app/**
 
 ## Technologies Used
 - Python
