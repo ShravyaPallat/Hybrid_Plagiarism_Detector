@@ -68,9 +68,8 @@ with st.sidebar:
 # ── Header ─────────────────────────────────────────────────────────────────────
 
 st.title("Hybrid Multimodal Plagiarism Detector")
-st.caption("TF-IDF · Sentence-BERT · OCR — as described in the paper")
+st.caption("TF-IDF · Sentence-BERT · OCR")
 st.divider()
-
 
 # ── Input columns ──────────────────────────────────────────────────────────────
 
