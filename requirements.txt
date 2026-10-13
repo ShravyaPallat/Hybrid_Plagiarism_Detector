@@ -10,3 +10,7 @@ pytesseract>=0.3.10
 
 # PDF support
 pymupdf>=1.24.0
+
+#Corpus
+wikipedia>=1.4.0
+ 

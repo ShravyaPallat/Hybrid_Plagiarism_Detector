@@ -1,4 +1,4 @@
-#Streamlit UI — Hybrid Multimodal Plagiarism Detection System
+# Streamlit UI — Hybrid Multimodal Plagiarism Detection System
 
 import streamlit as st
 import tempfile
@@ -9,6 +9,7 @@ from plagiarism_detector import (
     SBERTEngine, SimilarityAggregator, ReportGenerator,
     OCR_AVAILABLE, SBERT_AVAILABLE,
 )
+from corpus_builder import build_corpus, TOPICS
 
 # ── Page config ────────────────────────────────────────────────────────────────
 
@@ -35,14 +36,26 @@ st.markdown("""
 .verdict-high   { background: #f8d7da; border: 1px solid #f5c2c7; color: #842029; border-radius: 8px; padding: 12px 16px; }
 .verdict-medium { background: #fff3cd; border: 1px solid #ffecb5; color: #664d03; border-radius: 8px; padding: 12px 16px; }
 .verdict-low    { background: #d1e7dd; border: 1px solid #badbcc; color: #0f5132; border-radius: 8px; padding: 12px 16px; }
+.match-card { background: var(--background-secondary-color); border-radius: 8px; padding: 14px;
+              border-left: 4px solid #dee2e6; margin-bottom: 10px; color: var(--text-color); }
+.match-card.high-border  { border-left-color: #dc3545; }
+.match-card.med-border   { border-left-color: #fd7e14; }
+.match-card.low-border   { border-left-color: #198754; }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ── Load corpus (cached so it only fetches once per session) ──────────────────
+
+@st.cache_resource(show_spinner=False)
+def load_corpus():
+    return build_corpus()
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.title("Settings")
+    st.title("⚙️ Settings")
 
     st.subheader("Similarity Weights")
     lex_w = st.slider("TF-IDF weight", 0.0, 1.0, 0.4, 0.05)
@@ -51,12 +64,19 @@ with st.sidebar:
 
     st.divider()
     st.subheader("System Status")
-    st.write(f"{'Available' if OCR_AVAILABLE else 'Not available'} OCR (pytesseract)")
-    st.write(f"{'Available' if SBERT_AVAILABLE else 'Not available'} Sentence-BERT")
+    st.write(f"{'✅' if OCR_AVAILABLE else '❌'} OCR (pytesseract)")
+    st.write(f"{'✅' if SBERT_AVAILABLE else '❌'} Sentence-BERT")
     if not OCR_AVAILABLE:
         st.caption("Install: `pip install pillow pytesseract`")
     if not SBERT_AVAILABLE:
         st.caption("Install: `pip install sentence-transformers`")
+
+    st.divider()
+    st.subheader("Corpus")
+    st.write(f"**{len(TOPICS)} Wikipedia articles** as reference")
+    with st.expander("View topics"):
+        for t in TOPICS:
+            st.caption(f"• {t}")
 
     st.divider()
     st.subheader("Thresholds")
@@ -67,224 +87,245 @@ with st.sidebar:
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 
-st.title("Hybrid Multimodal Plagiarism Detector")
-st.caption("TF-IDF · Sentence-BERT · OCR")
+st.title("🔍 Hybrid Multimodal Plagiarism Detector")
+st.caption("Checks your submission against Wikipedia articles using TF-IDF · Sentence-BERT · OCR")
 st.divider()
 
-# ── Input columns ──────────────────────────────────────────────────────────────
 
-col_sub, col_ref = st.columns(2)
+# ── Load corpus with progress ─────────────────────────────────────────────────
 
-with col_sub:
-    st.subheader("Submission Document")
-    input_mode = st.radio("Input type", ["Text", "File upload"], horizontal=True, key="sub_mode")
+with st.spinner(f"Loading corpus from {len(TOPICS)} Wikipedia articles… (first load only)"):
+    corpus = load_corpus()
 
-    submission_text = ""
-    ocr_applied = False
+st.caption(f"✅ Corpus ready — {len(corpus)} articles loaded")
+st.divider()
 
-    if input_mode == "Text":
+
+# ── Input ──────────────────────────────────────────────────────────────────────
+
+st.subheader("📄 Upload or paste your submission")
+input_mode = st.radio(
+    "Input type",
+    ["Text", "File upload (txt / pdf / image)"],
+    horizontal=True,
+)
+
+submission_text = ""
+ocr_applied = False
+
+if input_mode == "Text":
+    col1, col2 = st.columns([3, 1])
+    with col1:
         submission_text = st.text_area(
-            "Paste submission text",
+            "Paste submission here",
             height=220,
             placeholder="Paste the student's submitted text here…",
             label_visibility="collapsed",
         )
-    else:
-        uploaded = st.file_uploader(
-            "Upload file", type=["txt", "pdf", "png", "jpg", "jpeg"],
-            label_visibility="collapsed",
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Load demo text"):
+            st.session_state["demo_text"] = (
+                "Machine learning is a subset of artificial intelligence that enables systems to "
+                "automatically learn and improve from experience without being explicitly programmed. "
+                "The process of learning begins with observations or data, such as examples, direct "
+                "experience, or instruction. Machine learning algorithms build a model based on sample "
+                "data, known as training data, in order to make predictions or decisions without being "
+                "explicitly programmed to do so. These algorithms are used in a wide variety of "
+                "applications, such as email filtering and computer vision."
+            )
+            st.rerun()
+
+    if "demo_text" in st.session_state:
+        submission_text = st.session_state["demo_text"]
+        st.text_area(
+            "Loaded demo:",
+            value=submission_text,
+            height=130,
+            disabled=True,
         )
-        if uploaded:
-            suffix = Path(uploaded.name).suffix.lower()
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(uploaded.read())
-                tmp_path = tmp.name
 
-            handler = InputHandler()
-            with st.spinner("Extracting text…"):
-                submission_text = handler.load(tmp_path)
-            os.unlink(tmp_path)
+else:
+    uploaded = st.file_uploader(
+        "Upload file",
+        type=["txt", "pdf", "png", "jpg", "jpeg"],
+        label_visibility="collapsed",
+    )
+    if uploaded:
+        suffix = Path(uploaded.name).suffix.lower()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(uploaded.read())
+            tmp_path = tmp.name
 
-            if suffix in {".png", ".jpg", ".jpeg"}:
-                ocr_applied = True
-                st.success(f"OCR applied — {len(submission_text.split())} words extracted")
+        handler = InputHandler()
+        with st.spinner("Extracting text…"):
+            result = handler.load(tmp_path)
+            # handle both old (str) and new (tuple) return formats
+            if isinstance(result, tuple):
+                submission_text, ocr_applied = result
             else:
-                st.success(f"Loaded — {len(submission_text.split())} words")
+                submission_text = result
+                ocr_applied = suffix in {".png", ".jpg", ".jpeg"}
 
-            with st.expander("Preview extracted text"):
-                st.text(submission_text[:1000] + ("…" if len(submission_text) > 1000 else ""))
+        os.unlink(tmp_path)
 
+        if ocr_applied:
+            st.success(f"✅ OCR applied — {len(submission_text.split())} words extracted")
+        else:
+            st.success(f"✅ Loaded — {len(submission_text.split())} words")
 
-with col_ref:
-    st.subheader("Reference Document")
-    ref_mode = st.radio("Input type", ["Text", "File upload"], horizontal=True, key="ref_mode")
-
-    reference_text = ""
-
-    if ref_mode == "Text":
-        reference_text = st.text_area(
-            "Paste reference text",
-            height=220,
-            placeholder="Paste the reference / source document here…",
-            label_visibility="collapsed",
-        )
-    else:
-        ref_uploaded = st.file_uploader(
-            "Upload file", type=["txt", "pdf", "png", "jpg", "jpeg"],
-            label_visibility="collapsed", key="ref_upload",
-        )
-        if ref_uploaded:
-            suffix = Path(ref_uploaded.name).suffix.lower()
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(ref_uploaded.read())
-                tmp_path = tmp.name
-
-            handler = InputHandler()
-            with st.spinner("Extracting text…"):
-                reference_text = handler.load(tmp_path)
-            os.unlink(tmp_path)
-            st.success(f"Loaded — {len(reference_text.split())} words")
-
-            with st.expander("Preview extracted text"):
-                st.text(reference_text[:1000] + ("…" if len(reference_text) > 1000 else ""))
+        with st.expander("Preview extracted text"):
+            st.text(submission_text[:800] + ("…" if len(submission_text) > 800 else ""))
 
 
-# ── Demo button ────────────────────────────────────────────────────────────────
-
-if st.button("Load demo texts"):
-    st.session_state["demo"] = True
-    st.rerun()
-
-if st.session_state.get("demo"):
-    submission_text = (
-        "Machine learning is a subset of artificial intelligence that enables systems to "
-        "automatically learn and improve from experience without being explicitly programmed. "
-        "The process of learning begins with observations or data, such as examples, direct "
-        "experience, or instruction. Machine learning algorithms build a model based on sample "
-        "data, known as training data, in order to make predictions or decisions without being "
-        "explicitly programmed to do so."
-    )
-    reference_text = (
-        "Machine learning (ML) is a type of artificial intelligence that allows software "
-        "applications to become more accurate at predicting outcomes without being explicitly "
-        "programmed. Machine learning algorithms use historical data as input to predict new "
-        "output values. It gives enterprises a view of trends in customer behavior and business "
-        "operational patterns, and supports the development of new products."
-    )
-    st.info("Demo texts loaded — click **Run Analysis** below.")
-
-
-# ── Run analysis ───────────────────────────────────────────────────────────────
+# ── Run ────────────────────────────────────────────────────────────────────────
 
 st.divider()
-run = st.button("Run Analysis", type="primary", use_container_width=True)
+run = st.button("🚀 Check for Plagiarism", type="primary", use_container_width=True)
 
 if run:
     if not submission_text.strip():
-        st.error("Please provide a submission document.")
-        st.stop()
-    if not reference_text.strip():
-        st.error("Please provide a reference document.")
+        st.error("Please provide a submission first.")
         st.stop()
 
     preprocessor = Preprocessor()
-    tfidf_engine = TFIDFEngine()
-    sbert_engine = SBERTEngine()
-    aggregator = SimilarityAggregator(lex_w, sem_w)
-    reporter = ReportGenerator()
+    tfidf_engine  = TFIDFEngine()
+    sbert_engine  = SBERTEngine()
+    aggregator    = SimilarityAggregator(lex_w, sem_w)
+    reporter      = ReportGenerator()
 
     progress = st.progress(0, text="Starting pipeline…")
 
-    # Step 1 — Preprocess
-    progress.progress(20, "Preprocessing text…")
-    tokens1 = preprocessor.process(submission_text)
-    tokens2 = preprocessor.process(reference_text)
-    clean1 = preprocessor.process_to_str(submission_text)
-    clean2 = preprocessor.process_to_str(reference_text)
+    # ── Preprocess submission ──────────────────────────────────────────────
+    progress.progress(10, "Preprocessing submission…")
+    sub_tokens = preprocessor.process(submission_text)
+    sub_clean  = preprocessor.process_to_str(submission_text)
 
-    # Step 2 — TF-IDF
-    progress.progress(40, "Computing TF-IDF similarity…")
-    tfidf_score = tfidf_engine.compute(tokens1, tokens2)
-    phrases = tfidf_engine.common_phrases(submission_text, reference_text)
+    # ── TF-IDF against all corpus docs ────────────────────────────────────
+    tfidf_scores = []
+    for i, doc in enumerate(corpus):
+        pct = 10 + int((i / len(corpus)) * 40)
+        progress.progress(pct, f"TF-IDF pass: {i+1}/{len(corpus)} articles…")
+        ref_tokens = preprocessor.process(doc["text"])
+        score = tfidf_engine.compute(sub_tokens, ref_tokens)
+        tfidf_scores.append((i, score))
 
-    # Step 3 — Sentence-BERT
-    progress.progress(65, "Running Sentence-BERT semantic analysis…")
+    # Sort and shortlist top candidates for SBERT
+    tfidf_scores.sort(key=lambda x: x[1], reverse=True)
+    top_candidates = tfidf_scores[:10]
+
+    # ── SBERT on shortlist ────────────────────────────────────────────────
+    progress.progress(60, "Running Sentence-BERT semantic analysis…")
+    sbert_scores = {}
     try:
-        sbert_score = sbert_engine.compute(clean1, clean2)
-    except ImportError:
-        sbert_score = tfidf_score
-        st.warning("Sentence-BERT unavailable — using TF-IDF score for semantic component.")
+        for corp_idx, tfidf_s in top_candidates:
+            ref_clean = preprocessor.process_to_str(corpus[corp_idx]["text"])
+            score = sbert_engine.compute(sub_clean, ref_clean)
+            sbert_scores[corp_idx] = score
+    except Exception as e:
+        for corp_idx, tfidf_s in top_candidates:
+            sbert_scores[corp_idx] = tfidf_s
+        st.warning(f"Sentence-BERT unavailable — using TF-IDF for semantic component. Error: {e}")
 
-    # Step 4 — Aggregate
+    # ── Combine & rank ────────────────────────────────────────────────────
     progress.progress(85, "Aggregating scores…")
-    hybrid = aggregator.combine(tfidf_score, sbert_score)
-    verdict = aggregator.verdict(hybrid)
+    results = []
+    for corp_idx, tfidf_s in tfidf_scores:
+        sbert_s = sbert_scores.get(corp_idx, tfidf_s)
+        hybrid  = aggregator.combine(tfidf_s, sbert_s)
+        phrases = tfidf_engine.common_phrases(submission_text, corpus[corp_idx]["text"])
+        results.append({
+            "title":        corpus[corp_idx]["title"],
+            "tfidf_score":  tfidf_s,
+            "sbert_score":  sbert_s,
+            "hybrid_score": hybrid,
+            "phrases":      phrases,
+        })
 
-    # Step 5 — Report
-    progress.progress(100, "Done")
-    report = reporter.generate(
-        submission_text, reference_text,
-        tfidf_score, sbert_score, hybrid,
-        verdict, phrases, ocr_applied,
-    )
+    results.sort(key=lambda x: x["hybrid_score"], reverse=True)
+    top5    = results[:5]
+    top_score = top5[0]["hybrid_score"] if top5 else 0.0
+    verdict   = aggregator.verdict(top_score)
 
+    progress.progress(100, "Done ✓")
+
+    # ── Results ───────────────────────────────────────────────────────────
     st.divider()
-    st.subheader("Results")
+    st.subheader("📊 Results")
 
-    # Score cards
-    c1, c2, c3 = st.columns(3)
     def colour(v): return "high" if v >= 0.65 else ("medium" if v >= 0.35 else "low")
 
+    top_tfidf = top5[0]["tfidf_score"] if top5 else 0
+    top_sbert = top5[0]["sbert_score"] if top5 else 0
+
+    c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown(f"""
-        <div class="metric-box">
-            <div class="metric-label">TF-IDF Lexical</div>
-            <div class="metric-value {colour(tfidf_score)}">{tfidf_score*100:.1f}%</div>
-            <div class="metric-label">String overlap</div>
-        </div>""", unsafe_allow_html=True)
-
+        st.markdown(f"""<div class="metric-box">
+            <div class="metric-label">Top TF-IDF Match</div>
+            <div class="metric-value {colour(top_tfidf)}">{top_tfidf*100:.1f}%</div>
+            <div class="metric-label">Lexical overlap</div></div>""",
+            unsafe_allow_html=True)
     with c2:
-        st.markdown(f"""
-        <div class="metric-box">
-            <div class="metric-label">Sentence-BERT</div>
-            <div class="metric-value {colour(sbert_score)}">{sbert_score*100:.1f}%</div>
-            <div class="metric-label">Semantic meaning</div>
-        </div>""", unsafe_allow_html=True)
-
+        st.markdown(f"""<div class="metric-box">
+            <div class="metric-label">Top Sentence-BERT Match</div>
+            <div class="metric-value {colour(top_sbert)}">{top_sbert*100:.1f}%</div>
+            <div class="metric-label">Semantic similarity</div></div>""",
+            unsafe_allow_html=True)
     with c3:
-        st.markdown(f"""
-        <div class="metric-box">
+        st.markdown(f"""<div class="metric-box">
             <div class="metric-label">Hybrid Score ({int(lex_w*100)}/{int(sem_w*100)})</div>
-            <div class="metric-value {colour(hybrid)}">{hybrid*100:.1f}%</div>
-            <div class="metric-label">Combined</div>
-        </div>""", unsafe_allow_html=True)
+            <div class="metric-value {colour(top_score)}">{top_score*100:.1f}%</div>
+            <div class="metric-label">Combined verdict</div></div>""",
+            unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Verdict banner
-    cls = "high" if hybrid >= 0.65 else ("medium" if hybrid >= 0.35 else "low")
-    icon = "⚠️" if hybrid >= 0.65 else ("ℹ️" if hybrid >= 0.35 else "✅")
+    cls  = "high" if top_score >= 0.65 else ("medium" if top_score >= 0.35 else "low")
+    icon = "⚠️" if top_score >= 0.65 else ("ℹ️" if top_score >= 0.35 else "✅")
     st.markdown(
         f'<div class="verdict-{cls}"><strong>{icon} {verdict}</strong></div>',
-        unsafe_allow_html=True,
+        unsafe_allow_html=True)
+
+    # Top matches
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("🔗 Top Matching Sources")
+
+    for rank, m in enumerate(top5, 1):
+        border = ("high-border" if m["hybrid_score"] >= 0.65
+                  else "med-border" if m["hybrid_score"] >= 0.35
+                  else "low-border")
+        phrases_html = "".join(
+            f'<span style="background:#fff3cd;padding:2px 6px;border-radius:4px;'
+            f'font-size:12px;margin:2px;display:inline-block;">"{p}"</span>'
+            for p in m["phrases"]
+        ) if m["phrases"] else "<em style='font-size:12px;color:#6c757d'>No exact phrase overlap</em>"
+
+        st.markdown(f"""
+        <div class="match-card {border}">
+            <strong>#{rank} {m['title']}</strong><br>
+            <span style="font-family:monospace;font-size:13px;">
+                TF-IDF: <b>{m['tfidf_score']*100:.1f}%</b> &nbsp;|&nbsp;
+                SBERT: <b>{m['sbert_score']*100:.1f}%</b> &nbsp;|&nbsp;
+                Hybrid: <b>{m['hybrid_score']*100:.1f}%</b>
+            </span><br><br>
+            {phrases_html}
+        </div>""", unsafe_allow_html=True)
+
+    # Report
+    report_text = reporter.generate(
+        submission_text, "", top_tfidf, top_sbert,
+        top_score, verdict,
+        top5[0]["phrases"] if top5 else [],
+        ocr_applied,
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # Matching phrases
-    if phrases:
-        st.subheader("Common Phrases Detected")
-        for p in phrases:
-            st.markdown(f"- `{p}`")
-
-    # Pipeline summary
-    with st.expander("Full Report"):
-        st.code(report, language="text")
-
-    # Download
     st.download_button(
-        "Download Report",
-        data=report,
+        "⬇️ Download Report",
+        data=report_text,
         file_name="plagiarism_report.txt",
         mime="text/plain",
     )
+    with st.expander("View full report"):
+        st.code(report_text, language="text")
